@@ -1,0 +1,35 @@
+#!/bin/bash
+
+set -euo pipefail
+
+[ "$1" ] && cd "$1"
+
+yt-dlp --no-mtime --write-info --flat-playlist --write-playlist-metafiles --write-thumbnail --output="playlist.%(ext)s" $(cat url) # download playlist metadata
+mv ids ids~ # backup old ids
+yt-dlp --flat-playlist --print-to-file id ids $(cat url) # get list of video ids
+
+for i in $(seq -w $(cat ids | wc -l)); do
+  id=$(sed "$i q;d" ids)
+
+  if compgen -G "*${id}*" > /dev/null; then echo $i exists
+  else
+    yt-dlp --no-mtime --write-thumbnail --write-subs --sub-langs=all,-live_chat --merge-output-format "mkv" --output="[%(id)s].%(ext)s" --write-info-json $id
+
+    # expecting no duplicates of the .info.json file
+    info_file=( *"[$id].info.json" )
+    cat "${info_file[0]}" | jq | sponge "$info_file"
+  fi
+
+  # again, no duplicates
+  info_file=( *"[$id].info.json" )
+  title=$(cat "${info_file[0]}" | jq -r .title | tr '/' '_')
+  channel=$(cat "${info_file[0]}" | jq -r .channel | tr '/' '_')
+
+  # update the names
+  for file in *"$id"*; do
+    ext="${file##*"[$id]"}"
+    name="$i $title - $channel [$id]$ext"
+    if [ "$name" == "$file" ]; then continue; fi
+    mv "$file" "$name"
+  done
+done
